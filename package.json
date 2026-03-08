@@ -1,6 +1,6 @@
 {
     "name": "clawbridge",
-    "version": "1.0.0",
+    "version": "2026.03.08-alpha",
     "description": "ClawBridge — Super bridge server for browser automation extensions",
     "main": "server.js",
     "scripts": {

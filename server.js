@@ -51,6 +51,22 @@ const SUPPORTED_JOB_TYPES = {
             postUrl: 'string',
         },
     },
+    'reply_facebook_comment': {
+        label: 'Reply on Facebook',
+        description: 'Reply to a post or specific comment on a Facebook group',
+        input: {
+            required: {
+                postUrl: 'string',  // URL of the Facebook group post
+                text: 'string',     // Reply text content
+            },
+            optional: {
+                commentId: 'string', // Target comment id (omit to reply to the post itself)
+            },
+        },
+        output: {
+            message: 'string',
+        },
+    },
 };
 
 // ============================================
@@ -229,6 +245,7 @@ function cleanOldJobs() {
 app.get('/health', (_req, res) => {
     res.json({
         status: 'ok',
+        version: 'Alpha 2026.03.08',
         jobCount: jobs.size,
         supportedTypes: Object.keys(SUPPORTED_JOB_TYPES),
         connectedExtensions: connectedExtensions.size,
@@ -407,7 +424,7 @@ app.listen(PORT, () => {
 
     console.log(`
 ╔═══════════════════════════════════════════════╗
-║  🌉 ClawBridge v1.0 — Super Bridge           ║
+║  🌉 ClawBridge Alpha 2026.03.08               ║
 ║  Server: http://localhost:${PORT}                  ║
 ║  ${authStatus.padEnd(44)}║
 ╠═══════════════════════════════════════════════╣
