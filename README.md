@@ -6,6 +6,8 @@ Define job types with full I/O schemas, schedule jobs, and let connected extensi
 
 ---
 
+![ClawBridge Architecture](workflow.png)
+
 ## ✨ Features
 
 - 🔌 **Plugin ecosystem** — any extension connects and declares which job types it handles
