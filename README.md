@@ -17,6 +17,14 @@ Define job types with full I/O schemas, schedule jobs, and let connected extensi
 
 ---
 
+## 🔌 Compatible Extensions
+
+| Extension | Job Types | Description |
+|-----------|-----------|-------------|
+| [ClawScrap](https://github.com/benteckxyz/clawscrap) | `flow_generate`, `post_x`, `post_facebook` | Browser automation for AI image gen + social posting |
+
+---
+
 ## 📋 Requirements
 
 - **Node.js** 18+
@@ -512,13 +520,6 @@ GET  /api/jobs/:id ───────────→ status: completed
                                   result: { imageBase64, imageUrls }
 ```
 
----
-
-## 🔌 Compatible Extensions
-
-| Extension | Job Types | Description |
-|-----------|-----------|-------------|
-| [ClawScrap](https://github.com/benteckxyz/clawscrap) | `flow_generate`, `post_x`, `post_facebook` | Browser automation for AI image gen + social posting |
 
 ---
 
