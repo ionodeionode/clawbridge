@@ -67,6 +67,43 @@ const SUPPORTED_JOB_TYPES = {
             message: 'string',
         },
     },
+    'search_google': {
+        label: 'Google Search',
+        description: 'Search Google and return organic results scraped from the browser',
+        input: {
+            required: { query: 'string' },
+            optional: { count: 'number', sort: 'string' },
+        },
+        output: {
+            organic: 'object[]',
+            peopleAlsoAsk: 'string[]',
+            totalResultsText: 'string',
+        },
+    },
+    'search_x': {
+        label: 'X/Twitter Search',
+        description: 'Search X.com and return tweets scraped from the browser',
+        input: {
+            required: { query: 'string' },
+            optional: { count: 'number', sort: 'string' },
+        },
+        output: {
+            tweets: 'object[]',
+        },
+    },
+    'fetch_x_profile': {
+        label: 'Fetch X Profile Tweets',
+        description: 'Get latest tweets from a specific X/Twitter profile',
+        input: {
+            required: { profileUrl: 'string' },
+            optional: { count: 'number', includeReplies: 'boolean' },
+        },
+        output: {
+            handle: 'string',
+            displayName: 'string',
+            tweets: 'object[]',
+        },
+    },
 };
 
 // ============================================
