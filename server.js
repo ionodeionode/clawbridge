@@ -3,7 +3,16 @@ const cors = require('cors');
 const { v4: uuidv4 } = require('uuid');
 
 const PORT = process.env.PORT || 3002;
-const API_KEY = process.env.API_KEY || null;
+
+// Multi-key support: API_KEYS=key1,key2,key3
+// Backward compat: API_KEY=singlekey still works
+const API_KEYS = new Set(
+    (process.env.API_KEYS || process.env.API_KEY || '')
+        .split(',')
+        .map(k => k.trim())
+        .filter(Boolean)
+);
+
 const app = express();
 
 app.use(cors());
@@ -155,12 +164,15 @@ function validateJobInput(typeDef, body) {
 }
 
 // ============================================
-// API Key Authentication
+// API Key Authentication + Per-Key Isolation
 // ============================================
 
 function authMiddleware(req, res, next) {
-    // Skip auth if no API_KEY is configured (local dev)
-    if (!API_KEY) return next();
+    // No keys configured = local dev, use shared namespace
+    if (API_KEYS.size === 0) {
+        req.apiKey = '__dev__';
+        return next();
+    }
 
     // Health endpoint is always public
     if (req.path === '/health') return next();
@@ -171,20 +183,28 @@ function authMiddleware(req, res, next) {
     }
 
     const token = authHeader.replace('Bearer ', '');
-    if (token !== API_KEY) {
+    if (!API_KEYS.has(token)) {
         return res.status(403).json({ success: false, error: 'Invalid API key' });
     }
 
+    // Attach validated key to request — used to isolate jobs & extensions
+    req.apiKey = token;
     next();
 }
 
 app.use(authMiddleware);
 
 // ============================================
-// Extension Registry (in-memory)
+// Per-Key Extension Registry (in-memory)
+// connectedExtensions: Map<apiKey, Map<extId, ext>>
 // ============================================
 
 const connectedExtensions = new Map();
+
+function getExtensionsForKey(apiKey) {
+    if (!connectedExtensions.has(apiKey)) connectedExtensions.set(apiKey, new Map());
+    return connectedExtensions.get(apiKey);
+}
 
 // POST /api/extensions/connect — Extension declares name + types it handles
 app.post('/api/extensions/connect', (req, res) => {
@@ -207,37 +227,41 @@ app.post('/api/extensions/connect', (req, res) => {
         });
     }
 
-    // Remove old connections with the same name (dedup on reconnect)
+    const exts = getExtensionsForKey(req.apiKey);
     const trimmedName = name.trim();
-    for (const [id, ext] of connectedExtensions) {
+
+    // Remove old connections with the same name (dedup on reconnect)
+    for (const [id, ext] of exts) {
         if (ext.name === trimmedName) {
-            connectedExtensions.delete(id);
-            console.log(`🔌 Replaced old connection for "${trimmedName}" (${id.substring(0, 8)}...)`);
+            exts.delete(id);
+            console.log(`🔌 Replaced old connection for "${trimmedName}" (${id.substring(0, 8)}...) [key: ${req.apiKey.substring(0, 8)}...]`);
         }
     }
 
     const extId = uuidv4();
-    connectedExtensions.set(extId, {
+    exts.set(extId, {
         id: extId,
-        name: name.trim(),
+        name: trimmedName,
         types,
+        apiKey: req.apiKey,
         connectedAt: Date.now(),
         lastPollAt: null,
     });
 
-    console.log(`🔌 Extension connected: "${name.trim()}" (${extId.substring(0, 8)}...) — handles: [${types.join(', ')}]`);
+    console.log(`🔌 Extension connected: "${trimmedName}" (${extId.substring(0, 8)}...) [key: ${req.apiKey.substring(0, 8)}...] — handles: [${types.join(', ')}]`);
 
     res.json({
         success: true,
         extensionId: extId,
-        name: name.trim(),
+        name: trimmedName,
         acceptedTypes: types,
     });
 });
 
-// GET /api/extensions — List connected extensions
-app.get('/api/extensions', (_req, res) => {
-    const list = [...connectedExtensions.values()].map(ext => ({
+// GET /api/extensions — List connected extensions (scoped to caller's key)
+app.get('/api/extensions', (req, res) => {
+    const exts = getExtensionsForKey(req.apiKey);
+    const list = [...exts.values()].map(ext => ({
         id: ext.id,
         name: ext.name,
         types: ext.types,
@@ -247,29 +271,36 @@ app.get('/api/extensions', (_req, res) => {
     res.json({ success: true, extensions: list });
 });
 
-// DELETE /api/extensions/:id — Disconnect extension
+// DELETE /api/extensions/:id — Disconnect extension (scoped to caller's key)
 app.delete('/api/extensions/:id', (req, res) => {
-    const ext = connectedExtensions.get(req.params.id);
+    const exts = getExtensionsForKey(req.apiKey);
+    const ext = exts.get(req.params.id);
     if (!ext) {
         return res.status(404).json({ success: false, error: 'Extension not found' });
     }
-    connectedExtensions.delete(req.params.id);
-    console.log(`🔌 Extension disconnected: "${ext.name}" (${ext.id.substring(0, 8)}...)`);
+    exts.delete(req.params.id);
+    console.log(`🔌 Extension disconnected: "${ext.name}" (${ext.id.substring(0, 8)}...) [key: ${req.apiKey.substring(0, 8)}...]`);
     res.json({ success: true });
 });
 
 // ============================================
-// In-Memory Job Queue
+// Per-Key In-Memory Job Queue
+// allJobs: Map<apiKey, Map<jobId, job>>
 // ============================================
 
-const jobs = new Map();
-const MAX_JOBS = 100;
+const allJobs = new Map();
+const MAX_JOBS_PER_KEY = 100;
 
-function cleanOldJobs() {
-    if (jobs.size > MAX_JOBS) {
+function getJobsForKey(apiKey) {
+    if (!allJobs.has(apiKey)) allJobs.set(apiKey, new Map());
+    return allJobs.get(apiKey);
+}
+
+function cleanOldJobs(jobs) {
+    if (jobs.size > MAX_JOBS_PER_KEY) {
         const sortedEntries = [...jobs.entries()]
             .sort((a, b) => a[1].createdAt - b[1].createdAt);
-        const toRemove = sortedEntries.slice(0, jobs.size - MAX_JOBS);
+        const toRemove = sortedEntries.slice(0, jobs.size - MAX_JOBS_PER_KEY);
         toRemove.forEach(([id]) => jobs.delete(id));
     }
 }
@@ -278,14 +309,16 @@ function cleanOldJobs() {
 // API Routes — Jobs
 // ============================================
 
-// Health check
+// Health check — always public, shows aggregate stats
 app.get('/health', (_req, res) => {
+    const totalJobs = [...allJobs.values()].reduce((s, m) => s + m.size, 0);
+    const totalExts = [...connectedExtensions.values()].reduce((s, m) => s + m.size, 0);
     res.json({
         status: 'ok',
-        version: 'Alpha 2026.03.08',
-        jobCount: jobs.size,
+        version: 'Alpha 2026.03.11',
+        jobCount: totalJobs,
         supportedTypes: Object.keys(SUPPORTED_JOB_TYPES),
-        connectedExtensions: connectedExtensions.size,
+        connectedExtensions: totalExts,
     });
 });
 
@@ -301,7 +334,7 @@ app.get('/api/types', (_req, res) => {
     res.json({ success: true, types });
 });
 
-// POST /api/jobs — Submit a job (any supported type)
+// POST /api/jobs — Submit a job (any supported type), scoped to caller's key
 // Validates input against schema definition
 // Optional: scheduledAt (ISO string or Unix ms) to schedule for later
 app.post('/api/jobs', (req, res) => {
@@ -347,18 +380,19 @@ app.post('/api/jobs', (req, res) => {
         updatedAt: Date.now(),
     };
 
+    const jobs = getJobsForKey(req.apiKey);
     jobs.set(job.id, job);
-    cleanOldJobs();
+    cleanOldJobs(jobs);
 
     // Log a label from the first required field
     const firstField = Object.keys(typeDef.input.required)[0];
     const label = payload[firstField] || '';
     const scheduleLog = scheduledTime ? ` ⏰ scheduled: ${new Date(scheduledTime).toISOString()}` : '';
-    console.log(`📥 [${type}] New job: ${job.id.substring(0, 8)}... — "${String(label).substring(0, 50)}"${scheduleLog}`);
+    console.log(`📥 [${type}] New job: ${job.id.substring(0, 8)}... — "${String(label).substring(0, 50)}"${scheduleLog} [key: ${req.apiKey.substring(0, 8)}...]`);
     res.json({ success: true, jobId: job.id, type, status: job.status, scheduledAt: job.scheduledAt });
 });
 
-// GET /api/jobs/pending — Extension polls for next pending job
+// GET /api/jobs/pending — Extension polls for next pending job (scoped to caller's key)
 // Requires extensionId query param to filter by connected extension's types
 app.get('/api/jobs/pending', (req, res) => {
     const { extensionId } = req.query;
@@ -367,31 +401,33 @@ app.get('/api/jobs/pending', (req, res) => {
         return res.status(400).json({ success: false, error: 'extensionId query param is required. Connect first via POST /api/extensions/connect' });
     }
 
-    const ext = connectedExtensions.get(extensionId);
+    const exts = getExtensionsForKey(req.apiKey);
+    const ext = exts.get(extensionId);
     if (!ext) {
-        return res.status(401).json({ success: false, error: 'Extension not connected. Call POST /api/extensions/connect first' });
+        return res.status(401).json({ success: false, error: 'Extension not connected (or wrong API key). Call POST /api/extensions/connect first' });
     }
 
     // Update last poll time
     ext.lastPollAt = Date.now();
 
     const now = Date.now();
+    const jobs = getJobsForKey(req.apiKey);
 
     // Promote scheduled jobs whose time has arrived
     for (const [, job] of jobs) {
         if (job.status === 'scheduled' && job.scheduledAt && job.scheduledAt <= now) {
             job.status = 'pending';
             job.updatedAt = now;
-            console.log(`⏰ [${job.type}] Scheduled job ready: ${job.id.substring(0, 8)}...`);
+            console.log(`⏰ [${job.type}] Scheduled job ready: ${job.id.substring(0, 8)}... [key: ${req.apiKey.substring(0, 8)}...]`);
         }
     }
 
-    // Find first pending job matching this extension's types
+    // Find first pending job matching this extension's types (within same key)
     for (const [, job] of jobs) {
         if (job.status === 'pending' && ext.types.includes(job.type)) {
             job.status = 'processing';
             job.updatedAt = now;
-            console.log(`🔄 [${job.type}] Job picked up by "${ext.name}": ${job.id.substring(0, 8)}...`);
+            console.log(`🔄 [${job.type}] Job picked up by "${ext.name}": ${job.id.substring(0, 8)}... [key: ${req.apiKey.substring(0, 8)}...]`);
             return res.json({ success: true, job });
         }
     }
@@ -399,8 +435,9 @@ app.get('/api/jobs/pending', (req, res) => {
     res.json({ success: true, job: null });
 });
 
-// PATCH /api/jobs/:id — Extension reports result
+// PATCH /api/jobs/:id — Extension reports result (scoped to caller's key)
 app.patch('/api/jobs/:id', (req, res) => {
+    const jobs = getJobsForKey(req.apiKey);
     const job = jobs.get(req.params.id);
     if (!job) {
         return res.status(404).json({ success: false, error: 'Job not found' });
@@ -414,13 +451,14 @@ app.patch('/api/jobs/:id', (req, res) => {
     job.updatedAt = Date.now();
 
     const emoji = status === 'completed' ? '✅' : '❌';
-    console.log(`${emoji} [${job.type}] Job ${status}: ${job.id.substring(0, 8)}...`);
+    console.log(`${emoji} [${job.type}] Job ${status}: ${job.id.substring(0, 8)}... [key: ${req.apiKey.substring(0, 8)}...]`);
 
     res.json({ success: true, job: { id: job.id, status: job.status } });
 });
 
-// GET /api/jobs/:id — Caller checks job status
+// GET /api/jobs/:id — Caller checks job status (scoped to caller's key)
 app.get('/api/jobs/:id', (req, res) => {
+    const jobs = getJobsForKey(req.apiKey);
     const job = jobs.get(req.params.id);
     if (!job) {
         return res.status(404).json({ success: false, error: 'Job not found' });
@@ -428,9 +466,10 @@ app.get('/api/jobs/:id', (req, res) => {
     res.json({ success: true, job });
 });
 
-// GET /api/jobs — List all jobs (debug)
-app.get('/api/jobs', (_req, res) => {
-    const allJobs = [...jobs.values()]
+// GET /api/jobs — List all jobs for caller's key (debug)
+app.get('/api/jobs', (req, res) => {
+    const jobs = getJobsForKey(req.apiKey);
+    const jobList = [...jobs.values()]
         .map(j => {
             // Extract label from first payload field
             const typeDef = SUPPORTED_JOB_TYPES[j.type];
@@ -446,7 +485,7 @@ app.get('/api/jobs', (_req, res) => {
             };
         })
         .sort((a, b) => b.createdAt - a.createdAt);
-    res.json({ success: true, jobs: allJobs });
+    res.json({ success: true, jobs: jobList });
 });
 
 // ============================================
@@ -454,14 +493,18 @@ app.get('/api/jobs', (_req, res) => {
 // ============================================
 
 app.listen(PORT, () => {
-    const authStatus = API_KEY ? '🔒 Auth: ENABLED' : '🔓 Auth: disabled (no API_KEY set)';
+    const keyCount = API_KEYS.size;
+    const authStatus = keyCount > 0
+        ? `🔒 Auth: ENABLED (${keyCount} key${keyCount > 1 ? 's' : ''})`
+        : '🔓 Auth: disabled (local dev)';
+
     const typeList = Object.entries(SUPPORTED_JOB_TYPES)
-        .map(([key, val]) => `    ${key.padEnd(18)} — ${val.label}`)
+        .map(([key, val]) => `    ${key.padEnd(22)} — ${val.label}`)
         .join('\n');
 
     console.log(`
 ╔═══════════════════════════════════════════════╗
-║  🌉 ClawBridge Alpha 2026.03.08               ║
+║  🌉 ClawBridge Alpha 2026.03.11               ║
 ║  Server: http://localhost:${PORT}                  ║
 ║  ${authStatus.padEnd(44)}║
 ╠═══════════════════════════════════════════════╣
@@ -470,12 +513,12 @@ app.listen(PORT, () => {
 ${typeList}
 
   API Endpoints:
-    POST /api/extensions/connect → Register extension
-    GET  /api/extensions         → List extensions
-    POST /api/jobs               → Submit job
-    GET  /api/jobs/pending       → Poll (requires extensionId)
-    PATCH /api/jobs/:id          → Report result
-    GET  /api/jobs/:id           → Check status
+    POST /api/extensions/connect → Register extension (per-key)
+    GET  /api/extensions         → List extensions (per-key)
+    POST /api/jobs               → Submit job (per-key)
+    GET  /api/jobs/pending       → Poll (requires extensionId, per-key)
+    PATCH /api/jobs/:id          → Report result (per-key)
+    GET  /api/jobs/:id           → Check status (per-key)
     GET  /api/types              → List supported types
     `);
 });
