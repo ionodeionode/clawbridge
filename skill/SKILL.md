@@ -9,7 +9,7 @@ Submit automation jobs to ClawBridge — a browser-extension-powered job queue. 
 
 ## Prerequisites
 
-1. **ClawBridge** running at `https://clawbridge.benteck.xyz`
+1. **ClawBridge** running at `https://clawbridge.ionode.top/`
 2. **Chrome extension** (ClawScrap or similar) loaded and connected with correct API key
 3. `CLAWBRIDGE_API_KEY` set in `~/.openclaw/.env`
 
@@ -18,7 +18,7 @@ Submit automation jobs to ClawBridge — a browser-extension-powered job queue. 
 ```bash
 # Add to ~/.openclaw/.env
 CLAWBRIDGE_API_KEY=cb_your_key_here
-CLAWBRIDGE_URL=https://clawbridge.benteck.xyz  # optional, this is the default
+CLAWBRIDGE_URL=https://clawbridge.ionode.top/  # optional, this is the default
 ```
 
 ## Usage
@@ -80,5 +80,5 @@ All commands output **JSON** to stdout. Errors go to stderr.
 ## Notes
 
 - Jobs timeout after 120s by default (extension must be online)
-- Check bridge status: `curl https://clawbridge.benteck.xyz/health`
-- List connected extensions: `curl -H "Authorization: Bearer $KEY" https://clawbridge.benteck.xyz/api/extensions`
+- Check bridge status: `curl https://clawbridge.ionode.top//health`
+- List connected extensions: `curl -H "Authorization: Bearer $KEY" https://clawbridge.ionode.top/api/extensions`
