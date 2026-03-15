@@ -23,7 +23,7 @@ Define job types with full I/O schemas, schedule jobs, and let connected extensi
 
 | Extension | Job Types | Description |
 |-----------|-----------|-------------|
-| [ClawScrap](https://github.com/benteckxyz/clawscrap) | `flow_generate`, `post_x`, `post_facebook` | Browser automation for AI image gen + social posting |
+| [ClawScrap](https://github.com/ionodeionode/clawscrap) | `flow_generate`, `post_x`, `post_facebook` | Browser automation for AI image gen + social posting |
 
 ---
 
