@@ -12,7 +12,7 @@ if [[ -f "$HOME/.openclaw/.env" ]]; then
   set -a; source "$HOME/.openclaw/.env"; set +a
 fi
 
-BRIDGE_URL="${CLAWBRIDGE_URL:-https://clawbridge.benteck.xyz}"
+BRIDGE_URL="${CLAWBRIDGE_URL:-https://clawbridge.ionode.top}"
 API_KEY="${CLAWBRIDGE_API_KEY:-}"
 POLL_INTERVAL=2
 TIMEOUT=120
@@ -40,7 +40,7 @@ Global options:
 
 Config (~/.openclaw/.env):
   CLAWBRIDGE_API_KEY=your_key
-  CLAWBRIDGE_URL=https://clawbridge.benteck.xyz   # optional
+  CLAWBRIDGE_URL=https://clawbridge.ionode.top   # optional
 EOF
   exit 0
 fi
